@@ -244,62 +244,79 @@ class MovieSE:
 			return
 		if not os.path.exists(index):
 			os.mkdir(index)
-		ret = self.ExpandDict(raw_info)
-		print ret
-		if ret.startswith('[Error]'):
-			return
-		stop_words = self.LoadStopwords()
-		raw_info_list = os.listdir(raw_info)
-		doc_num = len(raw_info_list)
-		movie_list = list()
-		doc_words = dict()
-		for movie_info in raw_info_list:
-			with open(raw_info + '/' + movie_info) as fr:
-				details = json.loads(fr.readlines()[0].strip())
-				word_list = list()
-				# word_list.append(details['name'])
-				word_list.extend(list(self.cutter(details['name'])))
-				# word_list.extend(details['director'])
-				for word in details['director']:
-					word_list.extend(list(self.cutter(word)))
-				# word_list.extend(details['writer'])
-				for word in details['writer']:
-					word_list.extend(list(self.cutter(word)))
-				# word_list.extend(details['actor'])
-				for word in details['actor']:
-					word_list.extend(list(self.cutter(word)))
-				word_list.extend(details['type'])
-				word_list.extend(list(self.cutter(details['summary'])))
-				movie_id = movie_info.split('.')[0]
-				movie_list.append(movie_id)
-				doc_words[movie_id] = word_list
-		word_docfreq = dict()
-		for docname, words in doc_words.iteritems():
-			for word in words:
-				if word in stop_words:
-					continue
-				word_docfreq.setdefault(word, dict())
-				if not word_docfreq[word].has_key(docname):
-					word_docfreq[word][docname] = words.count(word)
+		if not os.path.exists(index + '/' + 'dtmat.json') or \
+			not os.path.exists(index + '/' + 'keyword.json') or \
+			not os.path.exists(index + '/' + 'movieid.json'):
+			ret = self.ExpandDict(raw_info)
+			print ret
+			if ret.startswith('[Error]'):
+				return
+			stop_words = self.LoadStopwords()
+			raw_info_list = os.listdir(raw_info)
+			doc_num = len(raw_info_list)
+			movie_list = list()
+			doc_words = dict()
+			for movie_info in raw_info_list:
+				with open(raw_info + '/' + movie_info) as fr:
+					details = json.loads(fr.readlines()[0].strip())
+					word_list = list()
+					# word_list.append(details['name'])
+					word_list.extend(list(self.cutter(details['name'])))
+					# word_list.extend(details['director'])
+					for word in details['director']:
+						word_list.extend(list(self.cutter(word)))
+					# word_list.extend(details['writer'])
+					for word in details['writer']:
+						word_list.extend(list(self.cutter(word)))
+					# word_list.extend(details['actor'])
+					for word in details['actor']:
+						word_list.extend(list(self.cutter(word)))
+					word_list.extend(details['type'])
+					word_list.extend(list(self.cutter(details['summary'])))
+					movie_id = movie_info.split('.')[0]
+					movie_list.append(movie_id)
+					doc_words[movie_id] = word_list
+			word_docfreq = dict()
+			for docname, words in doc_words.iteritems():
+				for word in words:
+					if word in stop_words:
+						continue
+					word_docfreq.setdefault(word, dict())
+					if not word_docfreq[word].has_key(docname):
+						word_docfreq[word][docname] = words.count(word)
 
-		keyword_list = list()
-		for word in word_docfreq:
-			docfreq = word_docfreq[word]
-			doc, freq = zip(*(docfreq.items()))
-			tf_idf = float('-inf')
-			for i, f in enumerate(freq):
-				tf = float(f)/len(doc_words[doc[i]])
-				idf = np.log2(float(doc_num)/(len(doc)+1))
-				tf_idf = max(tf * idf, tf_idf)
-			if tf_idf >= 0.0001:
-				keyword_list.append(word)
+			keyword_list = list()
+			for word in word_docfreq:
+				docfreq = word_docfreq[word]
+				doc, freq = zip(*(docfreq.items()))
+				tf_idf = float('-inf')
+				for i, f in enumerate(freq):
+					tf = float(f)/len(doc_words[doc[i]])
+					idf = np.log2(float(doc_num)/(len(doc)+1))
+					tf_idf = max(tf * idf, tf_idf)
+				if tf_idf >= 0.1:
+					keyword_list.append(word)
 
-		dt_mat = np.zeros((len(keyword_list), len(movie_list)))
-		for i, word in enumerate(keyword_list):
-			for j, movie_id in enumerate(movie_list):
-				dt_mat[i,j] = word_docfreq[word].get(movie_id, 0)
-		print '[Info]: Index Building Success! You\'ve got {0} indeces and {1} movies'.\
-			format(len(keyword_list), len(movie_list))
+			dt_mat = np.zeros((len(keyword_list), len(movie_list)))
+			for i, word in enumerate(keyword_list):
+				for j, movie_id in enumerate(movie_list):
+					dt_mat[i,j] = word_docfreq[word].get(movie_id, 0)
+			print '[Info]: Index Building Success! You\'ve got {0} indeces and {1} movies'.\
+				format(len(keyword_list), len(movie_list))
+			# with open(index + '/' + 'dtmat.json', 'w') as fw:
+			# 	fw.write(json.dumps(dt_mat.tolist()))
+			# with open(index + '/' + 'keyword.json', 'w') as fw:
+			# 	fw.write(json.dumps(keyword_list))
+			# with open(index + '/' + 'movieid.json', 'w') as fw:
+			# 	fw.write(json.dumps(movie_list))
+		else:
+			with open(index + '/' + 'dtmat.json') as fr:
+				dt_mat = np.array(json.loads(fr.readlines()[0].strip()))
+			with open(index + '/' + 'keyword.json') as fr:
+				keyword_list = np.array(json.loads(fr.readlines()[0].strip()))				
+			with open(index + '/' + 'movieid.json') as fr:
+				movie_list = np.array(json.loads(fr.readlines()[0].strip()))
+			print '[Info]: Index Load Success!'
 		return dt_mat, keyword_list, movie_list
 
 
@@ -352,7 +369,7 @@ class MovieSE:
 		ind_vec = list(reversed(np.argsort(relation_vec.tolist())[0]))
 
 		count = 0
-		for i in range(10):
+		for i in range(min(len(ind_vec), 50)):
 			movie_id = movie_list[ind_vec[i]]
 			if relation_vec[0,ind_vec[i]] <= 0:
 				break
@@ -381,5 +398,5 @@ if __name__ == '__main__':
 	# mse.HtmlParser('../data/html', '../data/info')
 	# mse.IndexBuilder('../data/info_bak', '../data/index_bak')
 	# mse.LSI('../data/info_bak', '../data/index_bak')
-	mse.Query('唐锐意', '../data/info', '../data/index', LSI=False)
+	mse.Query('惊天魔盗团', '../data/info', '../data/index', LSI=False)
 	# mse.Query(u'开心')
