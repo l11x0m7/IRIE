@@ -89,5 +89,5 @@ ENV/
 .ropeproject
 
 # data
-html/
-html_bak/
+data/html/
+data/html_bak/
