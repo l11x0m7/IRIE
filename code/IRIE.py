@@ -172,8 +172,25 @@ class MovieSE:
 					fw.write(json.dumps(movie_info).encode('utf-8') + '\n')
 
 	# 做初始网页排名
-	def PageRank(self):
-		pass
+	def PageRank(self, M, p=0.8):
+		from numpy import *
+		# 完成初始化分配
+		for i in range(M.shape[1]):
+			if M[:,i].sum():
+				M[:,i] /= M[:,i].sum()
+
+		# 构造一个存放pr值得矩阵
+		v = ones((M.shape[0],1),dtype = float)/M.shape[0]
+
+		# e表示随机跳转到其他各个网页的概率，始终为等概率常数
+		e = v
+		new_v = p*dot(M,v) + (1-p)*e
+		# 判断pr矩阵是否收敛
+		while ((v-new_v)**2).sum() > 1e-8 and (v == new_v).all() == False:
+			print v
+			v = new_v
+			new_v = p*dot(M,v) + (1-p)*e
+		return v
 
 	# 扩展分词词典，加大分词准确率
 	def ExpandDict(self, raw_info='../data/info'):
