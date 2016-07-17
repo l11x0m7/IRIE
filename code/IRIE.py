@@ -59,7 +59,7 @@ class MovieSE:
 		self.moviehead = 'https://movie.douban.com/subject/'
 
 	# 下载html文档
-	def HtmlDownloader(self, origin_url, file_number, html_dir='../data/html/'):
+	def HtmlDownloader(self, origin_url, file_number, html_dir='../data/html'):
 		if not os.path.exists(html_dir):
 			os.mkdir(html_dir)
 		req = urllib2.Request(origin_url, headers=self.headers)
@@ -92,7 +92,7 @@ class MovieSE:
 					useless_url.add(o_url)
 					print '[Error]: {0}'.format(o_url)
 				else:
-					with open(html_dir + '{0}.html'.format(o_url), 'w') as fw:
+					with open(html_dir + '/' + '{0}.html'.format(o_url), 'w') as fw:
 						fw.write(content.encode('utf-8'))
 					count += 1
 					movie_reflect[o_url] = dict()
@@ -134,6 +134,7 @@ class MovieSE:
 		pattern_actor = r'"v:starring">(.*?)</a>'
 		pattern_type = r'"v:genre">(.*?)</span>'
 		pattern_summary = r'"v:summary".*?>(.*?)</span>'
+		pattern_all_summary = r'<span class="all hidden">(.*?)</span>'
 		for filename in dir_files:
 			# movie_info = {'name':'', 'director':[], 'writer':[], 'actor':[]\
 			# 'type':[], summary:''}
@@ -157,7 +158,9 @@ class MovieSE:
 					movie_info['writer'] = []
 				movie_info['actor'] = re.findall(pattern_actor, res, re.S)
 				movie_info['type'] = re.findall(pattern_type, res, re.S)
-				summary = re.findall(pattern_summary, content, re.S)
+				summary = re.findall(pattern_all_summary, content, re.S)
+				if len(summary) == 0:
+					summary = re.findall(pattern_summary, content, re.S)
 				if len(summary) > 0:
 					movie_info['summary'] = summary[0].strip().\
 						replace('<br />', '').replace('\t', ' ').\
@@ -172,25 +175,50 @@ class MovieSE:
 					fw.write(json.dumps(movie_info).encode('utf-8') + '\n')
 
 	# 做初始网页排名
-	def PageRank(self, M, p=0.8):
-		from numpy import *
+	def PageRank(self, pagerank_path = '../data/mul_pagerank.json', p=0.8):
+		import numpy as np
+
+		movielist = list()
+		movie_id = dict()
+		with open(pagerank_path) as fr:
+			movie_collection = fr.readlines()
+			for i, line in enumerate(movie_collection):
+				items = line.strip().split('\t')
+				movielist.append(items[0])
+				movie_id[items[0]] = i
+
+			M = np.zeros((len(movielist), len(movielist)), dtype=float)
+			for i, line in enumerate(movie_collection):
+				items = line.strip().split('\t')
+				next_movies = json.loads(items[1])
+				for m_id in next_movies.keys():
+					if m_id in movie_id:
+						M[movie_id[m_id],i] = next_movies[m_id]
+
+
 		# 完成初始化分配
 		for i in range(M.shape[1]):
 			if M[:,i].sum():
 				M[:,i] /= M[:,i].sum()
 
 		# 构造一个存放pr值得矩阵
-		v = ones((M.shape[0],1),dtype = float)/M.shape[0]
+		v = np.ones((M.shape[0],1),dtype = float)/M.shape[0]
 
-		# e表示随机跳转到其他各个网页的概率，始终为等概率常数
+		# e表示随机跳转到其他各个网页的概率，始终为等概率常数f
 		e = v
-		new_v = p*dot(M,v) + (1-p)*e
+		new_v = p*np.dot(M,v) + (1-p)*e
+		count = 0
 		# 判断pr矩阵是否收敛
 		while ((v-new_v)**2).sum() > 1e-8 and (v == new_v).all() == False:
-			print v
+			# print v
 			v = new_v
-			new_v = p*dot(M,v) + (1-p)*e
-		return v
+			new_v = p*np.dot(M,v) + (1-p)*e
+			count += 1
+		print '[Info]: Iteration Goes {0} Times.'.format(count)
+
+		if v.sum():
+			v /= v.sum()
+		return dict(zip(movielist, v))
 
 	# 扩展分词词典，加大分词准确率
 	def ExpandDict(self, raw_info='../data/info'):
@@ -255,6 +283,19 @@ class MovieSE:
 		print '[Info]: Stopwords Dictionary Loading Success!'
 		return stop_words
 
+	# 载入同义词词林
+	def LoadSimilarDict(self, dict_path='../dict/extendwords/哈工大信息检索研究中心同义词词林扩展版.txt'):
+		with open(dict_path) as fr:
+			sim_set_list = list()
+			word_simset = dict()
+			for i, line in enumerate(fr.readlines()):
+				line = line.strip().split(' ')
+				sim_set_list.append(line[1:])
+				for j in xrange(1, len(line)):
+					word_simset[line[j].decode()] = i
+		print '[Info]: Similarity Dictionary Loading Success!'
+		return sim_set_list, word_simset
+
 	# 建立索引
 	def IndexBuilder(self, raw_info='../data/info', index = '../data/index'):
 		if not os.path.exists(raw_info):
@@ -311,7 +352,7 @@ class MovieSE:
 					tf = float(f)/len(doc_words[doc[i]])
 					idf = np.log2(float(doc_num)/(len(doc)+1))
 					tf_idf = max(tf * idf, tf_idf)
-				if tf_idf >= 0.1:
+				if tf_idf >= 0.001:
 					keyword_list.append(word)
 
 			dt_mat = np.zeros((len(keyword_list), len(movie_list)))
@@ -337,7 +378,6 @@ class MovieSE:
 		return dt_mat, keyword_list, movie_list
 
 
-		# print json.dumps(doc_words['26775951'], ensure_ascii=False)
 
 	# 隐含语义索引
 	def LSI(self, raw_info, index):
@@ -355,9 +395,9 @@ class MovieSE:
 				new_s[i,i] = tmp_s[i]
 			new_dt_mat = new_u.dot(new_s).dot(new_v)
 
-			dt_pickle = open('dtmat.pkl', 'wb')
-			pickle.dump(new_dt_mat, dt_pickle)
-			dt_pickle.close()
+			# dt_pickle = open('dtmat.pkl', 'wb')
+			# pickle.dump(new_dt_mat, dt_pickle)
+			# dt_pickle.close()
 		else:
 			dt_pickle = open('dtmat.pkl', 'rb')
 			new_dt_mat = pickle.load(dt_pickle)
@@ -366,7 +406,7 @@ class MovieSE:
 
 
 	# 语句查询
-	def Query(self, query, raw_info, index, LSI=False):
+	def Query(self, query, raw_info, index, pagerank_path = '../data/mul_pagerank.json', p=0.8, LSI=False, PageRank=False):
 		if LSI:
 			dt_mat, keyword_list, movie_list = \
 				self.LSI(raw_info, index)
@@ -377,18 +417,50 @@ class MovieSE:
 		query_list = list(self.cutter(query))
 		if query not in query_list:
 			query_list.append(query)
+
+		# 同义词扩展Expansion
+		sim_list, sim_dict = self.LoadSimilarDict()
+		new_query_list = list()
+		for word in query_list:
+			if word in sim_dict:
+				new_query_list.extend(sim_list[sim_dict[word]])
+			else:
+				new_query_list.append(word)
+
+		query_list = new_query_list
+
 		query_vec = np.zeros((1, len(keyword_list)))
 		for i, keyword in enumerate(keyword_list):
 			query_vec[0,i] = query_list.count(keyword)
 			if keyword == query:
 				query_vec[0,i] *= 10
 		relation_vec = query_vec.dot(dt_mat)
-		ind_vec = list(reversed(np.argsort(relation_vec.tolist())[0]))
+		relation_vec = relation_vec[0]
 
+
+		# PageRank+搜索相关度打分
+		if PageRank:
+			movie2id = dict()
+			for i, movie in enumerate(movie_list):
+				movie2id[movie] = i
+			if relation_vec.sum():
+				relation_vec /= relation_vec.sum()
+
+			total_score = relation_vec.copy()
+			movie_score = self.PageRank(pagerank_path=pagerank_path, p=p)
+			for movie in movie_score:
+				if movie in movie2id:
+					total_score[movie2id[movie]] += movie_score[movie]
+		else:
+			total_score = relation_vec
+
+		# 排名
+		ind_vec = list(reversed(np.argsort(total_score)))
 		count = 0
 		for i in range(min(len(ind_vec), 50)):
 			movie_id = movie_list[ind_vec[i]]
-			if relation_vec[0,ind_vec[i]] <= 0:
+			# 只选取相关的网页/电影
+			if relation_vec[ind_vec[i]] <= 0:
 				break
 			count += 1
 			with open(raw_info + '/' + movie_id + '.json') as fr:
@@ -410,10 +482,11 @@ class MovieSE:
 
 if __name__ == '__main__':
 	mse = MovieSE()
-	# ret_info = mse.HtmlDownloader('https://movie.douban.com/', 5000)
+	# ret_info = mse.HtmlDownloader('https://movie.douban.com/', 2000, html_dir='../data/html_2000')
 	# print ret_info
-	# mse.HtmlParser('../data/html', '../data/info')
+	# mse.HtmlParser('../data/html_2000', '../data/info_2000')
 	# mse.IndexBuilder('../data/info_bak', '../data/index_bak')
 	# mse.LSI('../data/info_bak', '../data/index_bak')
-	mse.Query('惊天魔盗团', '../data/info', '../data/index', LSI=False)
+	# mse.PageRank()
+	mse.Query('惊天魔盗团2', '../data/info_2000', '../data/index_2000', LSI=False, PageRank=True)
 	# mse.Query(u'开心')
