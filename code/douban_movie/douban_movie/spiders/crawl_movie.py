@@ -48,7 +48,7 @@ class moviespider(CrawlSpider):
         item['summary']=''.join(response.xpath('//span[@property="v:summary"]/text()').extract())
         item['summary'] = item['summary'].strip().\
             replace('<br />', '').replace('\t', ' ').\
-            replace('\n', ' ').replace('&amp', '').replace(u'\u3000', '')
+            replace('\n', ' ').replace('&amp', '').replace('&quot;','').replace(u'\u3000', '')
         item['summary'] = re.sub(r' {1,}', ' ', item['summary'])
         if self.count == self.MAX_MOVIE:
             while True:
