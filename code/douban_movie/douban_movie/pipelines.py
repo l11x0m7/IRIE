@@ -59,8 +59,8 @@ class DoubanMoviePipeline(object):
             #         writer+='/'
 
         tx.execute("""
-                insert into doubanmovie (m_url,m_id,m_name,m_director,m_writer,m_role,m_types,m_summary) values (%s,%s,%s,%s,%s,%s,%s,%s)
-                """,(item['url'],item['ID'],item['name'],item['director'],item['writer'],item['role'],item['types'],item['summary']))
+                insert into doubanmovie (m_url,m_id,m_name,m_director,m_writer,m_role,m_types,m_summary, m_movieid) values (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,(item['url'],item['ID'],item['name'],item['director'],item['writer'],item['role'],item['types'],item['summary'],item['movieid']))
                 # """,(item['url'],item['ID'][0],item['name'][0],item['director'][0],item['writer'][0],item['role'][0],item['types'][0],item['summary'][0]))
         log.msg("item stored success in db: %s" % item, level=log.DEBUG)
 

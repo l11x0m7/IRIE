@@ -11,6 +11,7 @@ import urllib2
 import json
 import re
 import numpy as np
+import MySQLdb
 reload(sys)
 sys.setdefaultencoding('utf-8')
 
@@ -57,6 +58,10 @@ class MovieSE:
 		self.headers = { 'User-Agent' : user_agent }
 		self.mhp = MyHtmlParser()
 		self.moviehead = 'https://movie.douban.com/subject/'
+		# 数据库连接
+		conn=MySQLdb.connect(host="localhost",user="root",passwd="",db="moviedb",\
+						charset="utf8")    
+		self.cursor = conn.cursor()
 
 	# 下载html文档
 	def HtmlDownloader(self, origin_url, file_number, html_dir='../data/html'):
@@ -164,7 +169,8 @@ class MovieSE:
 				if len(summary) > 0:
 					movie_info['summary'] = summary[0].strip().\
 						replace('<br />', '').replace('\t', ' ').\
-						replace('\n', ' ').replace('&amp', '').replace(u'\u3000', '')
+						replace('\n', ' ').replace('&amp', '').replace('&quot;','').\
+						replace(u'\u3000', '')
 					movie_info['summary'] = re.sub(r' {1,}', ' ', movie_info['summary'])
 				else:
 					movie_info['summary'] = ''
@@ -175,25 +181,43 @@ class MovieSE:
 					fw.write(json.dumps(movie_info).encode('utf-8') + '\n')
 
 	# 做初始网页排名
-	def PageRank(self, pagerank_path = '../data/mul_pagerank.json', p=0.8):
+	# params
+	# pagerank_path：读取存储pagerank的文件
+	# p：当前网页点击链接跳转概率
+	# Mysql：确定是否用数据库里的数据，False表示使用存储在本地data文件夹里的数据
+	def PageRank(self, pagerank_path = '../data/mul_pagerank.json', p=0.8, Mysql=False):
 		import numpy as np
 
 		movielist = list()
 		movie_id = dict()
-		with open(pagerank_path) as fr:
-			movie_collection = fr.readlines()
-			for i, line in enumerate(movie_collection):
-				items = line.strip().split('\t')
+		if not Mysql:
+			with open(pagerank_path) as fr:
+				movie_collection = fr.readlines()
+				for i, line in enumerate(movie_collection):
+					items = line.strip().split('\t')
+					movielist.append(items[0])
+					movie_id[items[0]] = i
+
+				M = np.zeros((len(movielist), len(movielist)), dtype=float)
+				for i, line in enumerate(movie_collection):
+					items = line.strip().split('\t')
+					next_movies = json.loads(items[1])
+					for m_id in next_movies.keys():
+						if m_id in movie_id:
+							M[movie_id[m_id],i] = next_movies[m_id]
+		else:
+			self.cursor.execute('SELECT m_movieid, m_id FROM doubanmovie;')
+			movie_collection = self.cursor.fetchall()
+			for i, items in enumerate(movie_collection):
 				movielist.append(items[0])
 				movie_id[items[0]] = i
 
 			M = np.zeros((len(movielist), len(movielist)), dtype=float)
-			for i, line in enumerate(movie_collection):
-				items = line.strip().split('\t')
-				next_movies = json.loads(items[1])
-				for m_id in next_movies.keys():
+			for i, items in enumerate(movie_collection):
+				next_movies = items[1].split('/')
+				for m_id in next_movies:
 					if m_id in movie_id:
-						M[movie_id[m_id],i] = next_movies[m_id]
+						M[movie_id[m_id],i] += 1
 
 
 		# 完成初始化分配
@@ -280,10 +304,12 @@ class MovieSE:
 			for line in fr:
 				item = line.strip().decode()
 				stop_words.add(item)
+		stop_words.add(' ')
+		stop_words.add(u'\u3000')
 		print '[Info]: Stopwords Dictionary Loading Success!'
 		return stop_words
 
-	# 载入同义词词林
+	# 载入同义词词林，用于扩展Query
 	def LoadSimilarDict(self, dict_path='../dict/extendwords/哈工大信息检索研究中心同义词词林扩展版.txt'):
 		with open(dict_path) as fr:
 			sim_set_list = list()
@@ -297,7 +323,11 @@ class MovieSE:
 		return sim_set_list, word_simset
 
 	# 建立索引
-	def IndexBuilder(self, raw_info='../data/info', index = '../data/index'):
+	# params
+	# raw_info：存储格式化电影数据的目录，如果Mysql=False时从该目录读取数据，否则从数据库获取
+	# index：索引的保存目录，目前没有使用
+	# Mysql：确定是否用数据库里的数据，False表示使用存储在本地data文件夹里的数据
+	def IndexBuilder(self, raw_info='../data/info', index = '../data/index', Mysql=False):
 		if not os.path.exists(raw_info):
 			return
 		if not os.path.exists(index):
@@ -310,30 +340,65 @@ class MovieSE:
 			if ret.startswith('[Error]'):
 				return
 			stop_words = self.LoadStopwords()
-			raw_info_list = os.listdir(raw_info)
-			doc_num = len(raw_info_list)
+
 			movie_list = list()
 			doc_words = dict()
-			for movie_info in raw_info_list:
-				with open(raw_info + '/' + movie_info) as fr:
-					details = json.loads(fr.readlines()[0].strip())
+			doc_num = 0
+			if not Mysql:
+				raw_info_list = os.listdir(raw_info)
+				doc_num = len(raw_info_list)
+				for movie_info in raw_info_list:
+					with open(raw_info + '/' + movie_info) as fr:
+						details = json.loads(fr.readlines()[0].strip())
+						word_list = list()
+						word_list.append(details['name'].decode())
+						for word in re.split('[ :,.：，。]', details['name']):
+							word_list.extend(list(self.cutter(word)))
+							if word not in word_list:
+								word_list.append(word.decode())
+						# word_list.extend(details['director'])
+						for word in details['director']:
+							word_list.extend(list(self.cutter(word)))
+						# word_list.extend(details['writer'])
+						for word in details['writer']:
+							word_list.extend(list(self.cutter(word)))
+						# word_list.extend(details['actor'])
+						for word in details['actor']:
+							word_list.extend(list(self.cutter(word)))
+						word_list.extend(details['type'])
+						word_list.extend(list(self.cutter(details['summary'])))
+						movie_id = movie_info.split('.')[0]
+						movie_list.append(movie_id)
+						doc_words[movie_id] = word_list
+
+			else:
+				doc_num = self.cursor.execute('SELECT * FROM doubanmovie;')
+				total = self.cursor.fetchall()
+				for details in total:
 					word_list = list()
-					# word_list.append(details['name'])
-					word_list.extend(list(self.cutter(details['name'])))
-					# word_list.extend(details['director'])
-					for word in details['director']:
-						word_list.extend(list(self.cutter(word)))
-					# word_list.extend(details['writer'])
-					for word in details['writer']:
-						word_list.extend(list(self.cutter(word)))
-					# word_list.extend(details['actor'])
-					for word in details['actor']:
-						word_list.extend(list(self.cutter(word)))
-					word_list.extend(details['type'])
-					word_list.extend(list(self.cutter(details['summary'])))
-					movie_id = movie_info.split('.')[0]
+					# ID
+					movie_id = details[8]
 					movie_list.append(movie_id)
+					# Name
+					word_list.extend(list(self.cutter(details[2].split(' ')[0])))
+					# Director
+					for word in details[3].split('/'):
+						word_list.extend(list(self.cutter(word)))
+					# Writer
+					for word in details[4].split('/'):
+						word_list.extend(list(self.cutter(word)))
+					# Role
+					for word in details[5].split('/'):
+						word_list.extend(list(self.cutter(word)))
+					# Type
+					word_list.extend(details[6].split('/'))
+					# Summary
+					summary = details[7]
+					word_list.extend(list(self.cutter(summary)))
 					doc_words[movie_id] = word_list
+
+
+
 			word_docfreq = dict()
 			for docname, words in doc_words.iteritems():
 				for word in words:
@@ -352,7 +417,7 @@ class MovieSE:
 					tf = float(f)/len(doc_words[doc[i]])
 					idf = np.log2(float(doc_num)/(len(doc)+1))
 					tf_idf = max(tf * idf, tf_idf)
-				if tf_idf >= 0.001:
+				if tf_idf > 0.001:
 					keyword_list.append(word)
 
 			dt_mat = np.zeros((len(keyword_list), len(movie_list)))
@@ -377,13 +442,11 @@ class MovieSE:
 			print '[Info]: Index Load Success!'
 		return dt_mat, keyword_list, movie_list
 
-
-
 	# 隐含语义索引
-	def LSI(self, raw_info, index):
+	def LSI(self, raw_info, index, Mysql=False):
 		from numpy import linalg
 		import pickle
-		dt_mat, keyword_list, movie_list = self.IndexBuilder(raw_info, index)
+		dt_mat, keyword_list, movie_list = self.IndexBuilder(raw_info, index, Mysql=Mysql)
 		if not os.path.exists('dtmat.pkl'):
 			u, s, v = linalg.svd(dt_mat)
 			new_len = int(0.5*len(s))
@@ -406,65 +469,97 @@ class MovieSE:
 
 
 	# 语句查询
-	def Query(self, query, raw_info, index, pagerank_path = '../data/mul_pagerank.json', p=0.8, LSI=False, PageRank=False):
+	# params
+	# raw_info：存储格式化电影数据的目录，如果Mysql=False时从该目录读取数据，否则从数据库获取
+	# index：索引的保存目录，目前没有使用
+	# pagerank_path：读取存储pagerank的文件
+	# p：当前网页点击链接跳转概率
+	# LSI：是否使用LSI
+	# PageRank：是否使用PageRank
+	# Mysql：确定是否用数据库里的数据，False表示使用存储在本地data文件夹里的数据
+	def Query(self, raw_info, index, pagerank_path = '../data/mul_pagerank.json', p=0.8, LSI=False, PageRank=False, Mysql=False):
+		# 是否使用LSI，并建立索引
 		if LSI:
 			dt_mat, keyword_list, movie_list = \
-				self.LSI(raw_info, index)
+				self.LSI(raw_info, index, Mysql=Mysql)
 		else:
 			dt_mat, keyword_list, movie_list = \
-				self.IndexBuilder(raw_info, index)
+				self.IndexBuilder(raw_info, index, Mysql=Mysql)
 
-		query_list = list(self.cutter(query))
-		if query not in query_list:
-			query_list.append(query)
+		# PageRank打分
+		movie2id = dict()
+		for i, movie in enumerate(movie_list):
+			movie2id[movie] = i
+		movie_score = self.PageRank(pagerank_path=pagerank_path, p=p, Mysql=Mysql)
 
-		# 同义词扩展Expansion
+		# 同义词词林
 		sim_list, sim_dict = self.LoadSimilarDict()
-		new_query_list = list()
-		for word in query_list:
-			if word in sim_dict:
-				new_query_list.extend(sim_list[sim_dict[word]])
-			else:
-				new_query_list.append(word)
 
-		query_list = new_query_list
+		# Query
+		query = raw_input('Please input query(input "quit" to quit): ').decode()
+		while query != 'quit':
+			query_list = list(self.cutter(query))
+			if query not in query_list:
+				query_list.append(query)
 
-		query_vec = np.zeros((1, len(keyword_list)))
-		for i, keyword in enumerate(keyword_list):
-			query_vec[0,i] = query_list.count(keyword)
-			if keyword == query:
-				query_vec[0,i] *= 10
-		relation_vec = query_vec.dot(dt_mat)
-		relation_vec = relation_vec[0]
+			# 同义词Expansion
+			new_query_list = list()
+			for word in query_list:
+				if word in sim_dict:
+					new_query_list.extend(sim_list[sim_dict[word]])
+				else:
+					new_query_list.append(word)
+			query_list = new_query_list
 
+			# 相关度计算
+			query_important = re.split('[ :,.：，。]', query)
+			if query not in query_important:
+				query_important.append(query)
+			query_vec = np.zeros((1, len(keyword_list)))
+			for i, keyword in enumerate(keyword_list):
+				query_vec[0,i] = query_list.count(keyword)
+				if keyword in query_important:
+					query_vec[0,i] *= 10
+			relation_vec = query_vec.dot(dt_mat)
 
-		# PageRank+搜索相关度打分
-		if PageRank:
-			movie2id = dict()
-			for i, movie in enumerate(movie_list):
-				movie2id[movie] = i
+			relation_vec = relation_vec[0]
 			if relation_vec.sum():
 				relation_vec /= relation_vec.sum()
+			# PageRank+搜索相关度打分
+			if PageRank:
+				total_score = relation_vec.copy()
+				for movie in movie_score:
+					if movie in movie2id:
+						total_score[movie2id[movie]] += movie_score[movie]
+			else:
+				total_score = relation_vec
 
-			total_score = relation_vec.copy()
-			movie_score = self.PageRank(pagerank_path=pagerank_path, p=p)
-			for movie in movie_score:
-				if movie in movie2id:
-					total_score[movie2id[movie]] += movie_score[movie]
-		else:
-			total_score = relation_vec
+			# 排名
+			ind_vec = list(reversed(np.argsort(total_score)))
+			count = 0
+			
+			# 打印
+			for i in range(min(len(ind_vec), 50)):
+				movie_id = movie_list[ind_vec[i]]
+				# 只选取相关的网页/电影
+				if relation_vec[ind_vec[i]] <= 0:
+					break
+				count += 1
+				movie_info = dict()
+				if not Mysql:
+					with open(raw_info + '/' + movie_id + '.json') as fr:
+						movie_info = json.loads(fr.readlines()[0].strip())
+				else:
+					n = self.cursor.execute("SELECT * FROM doubanmovie WHERE m_movieid='{0}';".format(movie_id))
+					res = self.cursor.fetchone()
+					movie_info['name'] = res[2]
+					movie_info['director'] = res[3].split('/')
+					movie_info['writer'] = res[4].split('/')
+					movie_info['actor'] = res[5].split('/')
+					movie_info['type'] = res[6].split('/')
+					movie_info['summary'] = res[7]
+					movie_info['url'] = res[0]
 
-		# 排名
-		ind_vec = list(reversed(np.argsort(total_score)))
-		count = 0
-		for i in range(min(len(ind_vec), 50)):
-			movie_id = movie_list[ind_vec[i]]
-			# 只选取相关的网页/电影
-			if relation_vec[ind_vec[i]] <= 0:
-				break
-			count += 1
-			with open(raw_info + '/' + movie_id + '.json') as fr:
-				movie_info = json.loads(fr.readlines()[0].strip())
 				print '索引排名:', i+1
 				print '电影ID:', movie_id
 				print '电影名称:', movie_info['name']
@@ -475,18 +570,20 @@ class MovieSE:
 				print '简介:', movie_info['summary']
 				print '网址:', movie_info['url']
 				print
-		print '以上即为查询结果，共{0}条。'.format(count)
+
+			print '以上即为查询结果，共{0}条。'.format(count)
+			query=raw_input('Please input query(input "quit" to quit): ').decode()
+
+		print '感谢您的使用~'
 
 
 
 
 if __name__ == '__main__':
 	mse = MovieSE()
+	# 下载与解析数据
 	# ret_info = mse.HtmlDownloader('https://movie.douban.com/', 2000, html_dir='../data/html_2000')
 	# print ret_info
 	# mse.HtmlParser('../data/html_2000', '../data/info_2000')
-	# mse.IndexBuilder('../data/info_bak', '../data/index_bak')
-	# mse.LSI('../data/info_bak', '../data/index_bak')
-	# mse.PageRank()
-	mse.Query('惊天魔盗团2', '../data/info_2000', '../data/index_2000', LSI=False, PageRank=True)
-	# mse.Query(u'开心')
+
+	mse.Query('../data/info_2000', '../data/index_2000', LSI=False, PageRank=False, Mysql=False)

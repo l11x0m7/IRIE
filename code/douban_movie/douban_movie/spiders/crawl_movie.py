@@ -37,6 +37,7 @@ class moviespider(CrawlSpider):
         # types=Field()
         # summary=Field()
         item['url']=re.match(string=''.join(response.url), pattern='(https://movie.douban.com/subject/\d+)/.*').group(1)
+        item['movieid'] = item['url'].split('/')[-1]
         item['ID']='/'.join(response.xpath('//*/a[contains(@href,"subject")]/@href').re('movie.douban.com/subject/(\d+)/(?:\?from|$)'))
         # item['ID']=''.join(response.xpath('//*[@id="content"]/div/div[1]/div[1]/div[3]/ul/li[5]/span/@id').extract())
         item['name']=''.join(response.xpath('//*[@id="content"]/h1/span[1]/text()').extract())
@@ -45,6 +46,10 @@ class moviespider(CrawlSpider):
         item['role']='/'.join(response.xpath('//*[@id="info"]/span[3]/span[2]/a/text()').extract())
         item['types']='/'.join(response.xpath('//span[@property="v:genre"]/text()').extract())
         item['summary']=''.join(response.xpath('//span[@property="v:summary"]/text()').extract())
+        item['summary'] = item['summary'].strip().\
+            replace('<br />', '').replace('\t', ' ').\
+            replace('\n', ' ').replace('&amp', '').replace(u'\u3000', '')
+        item['summary'] = re.sub(r' {1,}', ' ', item['summary'])
         if self.count == self.MAX_MOVIE:
             while True:
                 print 'You have got {0} movies, please quit!'.format(self.MAX_MOVIE)
