@@ -39,7 +39,7 @@ class MainWindow(QtGui.QWidget):
 
         self.form = Form
         self.pushButton = QtGui.QPushButton(Form)
-        self.pushButton.setGeometry(QtCore.QRect(860, 40, 70, 30))
+        self.pushButton.setGeometry(QtCore.QRect(860, 40, 100, 30))
         self.pushButton.setObjectName(_fromUtf8("pushButton"))
 
         self.titleEdit = QtGui.QLineEdit(Form)

@@ -546,6 +546,8 @@ class MovieSE:
 			ind_vec = list(reversed(np.argsort(total_score)))
 			count = 0
 			
+			if not query:
+				relation_vec[:] = 0
 			# 打印
 			for i in range(min(len(ind_vec), 50)):
 				movie_id = movie_list[ind_vec[i]]
@@ -665,6 +667,8 @@ class MovieSE:
 		
 		# 打印
 		res = ''
+		if not query:
+			relation_vec[:] = 0
 		for i in range(min(len(ind_vec), 50)):
 			movie_id = movie_list[ind_vec[i]]
 			# 只选取相关的网页/电影
