@@ -1,7 +1,7 @@
 # IRIE
 Information Retrieval System
 
-# # Usage
+## Usage
 运行命令行模式<br>
 `python IRIE.py`
 
