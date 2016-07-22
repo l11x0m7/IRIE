@@ -53,15 +53,18 @@ class MyHtmlParser(HTMLParser):
 
 # 电影搜索引擎
 class MovieSE:
-	def __init__(self):
+	def __init__(self, use_mysql=False):
 		user_agent = 'Mozilla/4.0 (compatible; MSIE 5.5; Windows NT)'
 		self.headers = { 'User-Agent' : user_agent }
 		self.mhp = MyHtmlParser()
 		self.moviehead = 'https://movie.douban.com/subject/'
-		# 数据库连接
-		conn=MySQLdb.connect(host="localhost",user="root",passwd="",db="moviedb",\
-						charset="utf8")    
-		self.cursor = conn.cursor()
+		if use_mysql:
+			# 数据库连接
+			conn=MySQLdb.connect(host="localhost",user="root",passwd="",db="moviedb",\
+							charset="utf8")    
+			self.cursor = conn.cursor()
+		else:
+			self.cursor = None
 
 		self.raw_info = '../data/info_2000'
 		self.index = '../data/index_2000'
@@ -250,6 +253,8 @@ class MovieSE:
 
 		if v.sum():
 			v /= v.sum()
+		print 'The random input probability of each web is:\n', v
+		print 'The sum of all web random input probability is:',v.sum()
 		return dict(zip(movielist, v))
 
 	# 扩展分词词典，加大分词准确率
@@ -406,7 +411,6 @@ class MovieSE:
 					doc_words[movie_id] = word_list
 
 
-
 			word_docfreq = dict()
 			for docname, words in doc_words.iteritems():
 				for word in words:
@@ -415,6 +419,7 @@ class MovieSE:
 					word_docfreq.setdefault(word, dict())
 					if not word_docfreq[word].has_key(docname):
 						word_docfreq[word][docname] = words.count(word)
+
 
 			keyword_list = list()
 			for word in word_docfreq:
@@ -637,6 +642,8 @@ class MovieSE:
 			else:
 				new_query_list.append(word)
 		query_list = new_query_list
+
+		print json.dumps(query_list, ensure_ascii=False)
 
 		# 相关度计算
 		query_important = re.split('[ :,.：，。]', query)
